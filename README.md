@@ -2,10 +2,10 @@
 
 Use homography and optical flow to align scanned documents, recover the base document.
 
-![alt tag](https://raw.githubusercontent.com/dongwang218/alignment/master/corrected.jpg)
+![alt tag](https://raw.githubusercontent.com/dongwang218/alignment/flow/corrected.jpg)
 
 from these documents:
-![alt tag](https://raw.githubusercontent.com/dongwang218/alignment/master/collate.jpg)
+![alt tag](https://raw.githubusercontent.com/dongwang218/alignment/flow/collate.jpg)
 
 ## Identify the best image
 ```
