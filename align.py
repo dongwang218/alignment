@@ -12,13 +12,21 @@ from scipy import ndimage
 from myutils import *
 from flow import order_candidates
 
+def revert_flow(gray, flow):
+  h, w = flow.shape[:2]
+  tmp = np.copy(flow)
+  tmp[:,:,0] += np.arange(w)
+  tmp[:,:,1] += np.arange(h)[:,np.newaxis]
+  res = cv2.remap(gray, tmp, None, cv2.INTER_LINEAR)
+  return res
+
 def get_red_mask(img):
   bgr_inv = 255 - img
   hsv_inv = cv2.cvtColor(bgr_inv, cv2.COLOR_BGR2HSV)
   mask = cv2.inRange(hsv_inv, np.array([90 - 10, 70, 50]), np.array([90 + 10, 255, 255]))
   return mask
 
-def match_and_clean(first, second, binary, threshold, verbose):
+def match_and_clean(first, second, binary, threshold, verbose, percentile):
   imageA = cv2.imread(first)
   max_width = imageA.shape[1]
   gray = enhance(imageA, binary)
@@ -34,8 +42,8 @@ def match_and_clean(first, second, binary, threshold, verbose):
     transformed = stitcher.stitch([imageA, imageB], showMatches=False, reprojThresh=4.0)
     grayB = enhance(transformed, binary)
 
-    flow = cv2.calcOpticalFlowFarneback(grayB, gray, None, 0.5, 2, 15, 3, 5, 1.1, 0)
-    flowB = warp_flow(transformed, flow)
+    flow = cv2.calcOpticalFlowFarneback(gray, grayB, None, 0.5, 2, 15, 3, 5, 1.1, 0)
+    flowB = revert_flow(transformed, flow)
     warped_gray = enhance(flowB, binary)
     warped.append(warped_gray)
     diff += diff_image(gray, warped_gray)
@@ -45,6 +53,7 @@ def match_and_clean(first, second, binary, threshold, verbose):
 
   others = np.median(np.array(warped), axis=0).astype(np.uint8)
   #others = ((np.max(np.array(warped), axis=0) + np.mean(np.array(warped), axis=0)) / 2).astype(np.uint8)
+  others_percentile = np.percentile(np.array(warped), percentile, axis=0).astype(np.uint8)
 
   black, white = estimate_black_white(gray)
   print('black', black, 'white', white)
@@ -76,7 +85,7 @@ def match_and_clean(first, second, binary, threshold, verbose):
     cv2.imshow("others", imutils.resize(others, width=1280))
     cv2.waitKey(0)
 
-  return corrected, others, diff
+  return corrected, others_percentile, diff
 
 if __name__ == '__main__':
 
@@ -93,6 +102,7 @@ if __name__ == '__main__':
   ap.add_argument('--max_images', type=int, default=60, help='only consider up to 60 images')
   ap.add_argument('--working_dir', type=str, default='/tmp/mysplit', help='working dir')
   ap.add_argument('--try_split', type=int, default=1, help='whether try to split in half')
+  ap.add_argument('--percentile', type=float, default=80, help='percentile to pick as output')
 
   ap.add_argument("files", nargs='*',
     help="path to the second images")
@@ -136,7 +146,7 @@ if __name__ == '__main__':
   split_index = is_gray_double_page(gray, args.binary)
 
   if args.try_split != 1 or split_index is None:
-    corrected, others, diff = match_and_clean(first, second[:args.number], args.binary, args.threshold, args.verbose)
+    corrected, others, diff = match_and_clean(first, second[:args.number], args.binary, args.threshold, args.verbose, args.percentile)
   else:
     dir_left = os.path.join(args.working_dir, 'left')
     dir_right = os.path.join(args.working_dir, 'right')
@@ -169,14 +179,16 @@ if __name__ == '__main__':
       cv2.imwrite(right_file, transformed[:, n_split_index:])
       if len(left) > args.number:
         break
-    corrected_left, others_left, diff_left = match_and_clean(left[0], left[1:], args.binary, args.threshold, args.verbose)
-    corrected_right, others_right, diff_right = match_and_clean(right[0], right[1:], args.binary, args.threshold, args.verbose)
+    corrected_left, others_left, diff_left = match_and_clean(left[0], left[1:], args.binary, args.threshold, args.verbose, args.percentile)
+    corrected_right, others_right, diff_right = match_and_clean(right[0], right[1:], args.binary, args.threshold, args.verbose, args.percentile)
     corrected = np.concatenate((corrected_left, corrected_right), axis=1)
     others = np.concatenate((others_left, others_right), axis=1)
     diff = np.concatenate((diff_left, diff_right), axis=1)
 
   np.save('diff.npy', diff)
   cv2.imwrite('corrected.png', corrected)
+  if not os.path.exists(args.out_dir):
+    os.makedirs(args.out_dir)
   outfile = os.path.join(args.out_dir, os.path.basename(first).split('.')[0]+'.png')
   cv2.imwrite(outfile, corrected)
   cv2.imwrite(outfile.split('.')[0]+'-binary.png', enhance(corrected))
